@@ -1,0 +1,150 @@
+---
+title: "Case Olist"
+author: "Nathalia"
+date: today
+format: html
+toc: true
+toc-title: "Tópicos" 
+lang: "pt"
+code-fold: true
+editor_options: 
+  chunk_output_type: console
+execute:
+  warning: false
+jupyter: python3
+---
+
+```{r}
+library(readr)
+library(tidyverse)
+```
+
+```{r}
+## PAGAMENTOS
+df_pagamentos <-  read_csv(  "olist_dados/archive/olist_order_payments_dataset.csv")
+pag_mais_freq <- df_pagamentos %>% 
+  group_by(payment_type) %>% summarise(n = n()) %>% 
+  filter(n == max(n)) %>% pull(payment_type)
+df_pagamentos <- df_pagamentos %>% 
+  mutate(
+    payment_type = if_else(payment_type == "not_defined", pag_mais_freq, payment_type)
+  )
+
+df_forma_pag <- df_pagamentos %>% # Forma de pagamento
+  group_by(order_id, payment_type) %>% 
+  summarise(
+    n = n()
+  ) %>% pivot_wider(
+    names_from = payment_type, values_from = n, names_prefix = 'TipoPag_', values_fill = 0
+  ) %>% mutate(
+    soma_tipos_pagamentos = sum(c_across(starts_with("TipoPag_")))
+  )
+
+df_registro <- df_pagamentos %>% # Registro pag
+  group_by(order_id) %>% 
+  summarise(
+    log_valor_pago = log(sum(payment_value)),
+    pago_a_vista = if_else(max(payment_sequential)==1, "Sim", "Nao"),
+    log_valor_medio_parcela = log(mean(payment_value))
+  )
+
+## PEDIDOS - tirar os cancelados?
+df_pedidos <- read_csv("olist_dados/archive/olist_orders_dataset.csv")
+data_atual <- as.Date("2018-05-31")
+df_pedidos <- df_pedidos %>% 
+  mutate(
+    dia_pedido = weekdays(order_purchase_timestamp),
+    tempo_conf_pedido = case_when(
+      is.na(order_approved_at) ~ 
+        as.numeric(difftime(data_atual, order_purchase_timestamp, units = "days")),
+      TRUE ~ as.numeric(difftime(order_approved_at, order_purchase_timestamp, units = "days"))
+      ),
+    atraso_prev_entrega = case_when(
+      is.na(order_estimated_delivery_date) & 
+        as.numeric(difftime(data_atual, order_delivered_customer_date, units = "days")) <= 0 ~ "Sim",
+      !is.na(order_estimated_delivery_date) & 
+        as.numeric(difftime(order_estimated_delivery_date, order_delivered_customer_date, units = "days")) <= 0 ~ "Sim",
+      TRUE ~ "Nao"
+    )
+  )
+
+
+df_pedidos%>% summary()
+
+df_cliente <- read_csv("olist_dados/archive/olist_customers_dataset.csv")
+df_cliente%>% summary()
+
+#df_local <- read_csv("olist_dados/archive/olist_geolocation_dataset.csv")
+df_avalia <- read_csv("olist_dados/archive/olist_order_reviews_dataset.csv")
+df_avalia <- df_avalia %>% 
+  mutate(
+    len_titulo = df_avalia$review_comment_title %>% nchar() %>% replace_na(0),
+    len_comentario = df_avalia$review_comment_message %>% nchar() %>% replace_na(0),
+    comentario_exc = ifelse(is.na(df_avalia$review_comment_message), 0, str_count(df_avalia$review_comment_message, fixed("!")))# contar ! como + e  como neg, linhas de ex: 755 e 812 
+  ) %>% 
+  mutate(
+    colocou_titulo = ifelse(len_titulo > 0 , "Sim", "Nao"),
+    colocou_exc = ifelse(comentario_exc > 0 , "Sim", "Nao")
+  )
+
+df_avalia %>% filter(comentario_exc > 100) %>% select(review_comment_message)
+
+df_ordem_compra <- 
+  df_forma_pag %>% inner_join(df_registro, join_by(order_id)) %>% # Pagamentos
+  inner_join(df_pedidos, join_by(order_id)) %>% 
+  inner_join(df_avalia, join_by(order_id)) %>% 
+  inner_join(df_cliente, join_by(customer_id))
+
+########
+df_items <- read_csv("olist_dados/archive/olist_order_items_dataset.csv")
+df_items <- df_items %>% mutate(
+  log_price = log(df_items$price),
+  log_frete = log(df_items$freight_value+1)
+)
+
+df_prod <- read_csv("olist_dados/archive/olist_products_dataset.csv")
+df_prod %>% summary()
+
+df_logista <- read_csv("olist_dados/archive/olist_sellers_dataset.csv")
+
+df_compra = df_prod %>%
+  inner_join(df_items, join_by(product_id))
+df_compra
+
+########
+df <- df_ordem_compra %>%
+  inner_join(df_compra, join_by(order_id))
+
+##########
+df_ordem_compra %>% 
+  ggplot(aes(y = len_comentario, x = as_factor(review_score), fill = colocou_titulo)) +
+  geom_boxplot()
+
+df_ordem_compra %>% 
+  ggplot(aes(y = len_comentario, x = as_factor(review_score), fill = colocou_exc)) +
+  geom_boxplot()
+```
+
+\newpage
+
+# Dados
+```{r}
+library(reticulate)
+reticulate::use_condaenv("base", required = TRUE)
+
+library(tidyverse)
+```
+
+
+```{r}
+mtcars
+```
+
+
+# Tratamento dos Dados
+```{python}
+x = 3
+x += 1
+print(x)
+```
+
