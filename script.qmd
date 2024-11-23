@@ -15,6 +15,7 @@ jupyter: python3
 ---
 
 ```{r}
+rm(list = ls())
 library(readr)
 library(tidyverse)
 ```
@@ -68,10 +69,21 @@ df_pedidos <- df_pedidos %>%
     )
   )
 
-
 df_pedidos%>% summary()
 
+## CLIENTES
 df_cliente <- read_csv("olist_dados/archive/olist_customers_dataset.csv")
+df_cliente <- df_cliente %>% mutate(
+  regiao_cliente = case_when(
+    customer_state %in% c("SP") ~ "SP",
+    customer_state %in% c("SP", "MG", "RJ", "ES") ~ "Sudeste-SP",
+    customer_state %in% c("PR", "RS", "MS") ~ "Sul",
+    customer_state %in% c("DF", "GO", "MT") ~ "Sul",
+    TRUE ~ "NorteNordeste"
+  )
+)
+df_cliente$regiao_cliente %>% table()
+
 df_cliente%>% summary()
 
 #df_local <- read_csv("olist_dados/archive/olist_geolocation_dataset.csv")
@@ -93,7 +105,27 @@ df_ordem_compra <-
   df_forma_pag %>% inner_join(df_registro, join_by(order_id)) %>% # Pagamentos
   inner_join(df_pedidos, join_by(order_id)) %>% 
   inner_join(df_avalia, join_by(order_id)) %>% 
-  inner_join(df_cliente, join_by(customer_id))
+  inner_join(df_cliente, join_by(customer_id)) # Cliente
+
+# ordem primeira compra: df_ordem_compra, summarise_if (acumulada)
+df_ordem_primeira_compra <- df_ordem_compra %>% 
+  group_by(customer_unique_id) %>% 
+  summarise(
+    data_prim_compra = min(order_purchase_timestamp),
+    data_ultima_compra = max(order_purchase_timestamp),
+    primeira_compra_cliente = if_else(n()>1, 'Sim', 'Nao')
+    )
+
+df_ordem_compra_fim <- df_ordem_compra %>% 
+  inner_join(df_ordem_primeira_compra, join_by(customer_unique_id)) %>% 
+  mutate(
+  primeira_ordem_por_cliente = case_when(
+    data_prim_compra == order_purchase_timestamp ~ 'Primeira',
+    data_ultima_compra == order_purchase_timestamp ~ 'Ultima',
+    TRUE ~ '2oumais' #data_prim_compra < order_purchase_timestamp && data_ultima_compra < order_purchase_timestamp
+  )
+)
+
 
 ########
 df_items <- read_csv("olist_dados/archive/olist_order_items_dataset.csv")
@@ -101,6 +133,12 @@ df_items <- df_items %>% mutate(
   log_price = log(df_items$price),
   log_frete = log(df_items$freight_value+1)
 )
+
+df_items %>% group_by(order_id) %>% 
+  summarise(
+    produtos_por_pedido = n()
+  )
+
 
 df_prod <- read_csv("olist_dados/archive/olist_products_dataset.csv")
 df_prod %>% summary()
@@ -112,17 +150,40 @@ df_compra = df_prod %>%
 df_compra
 
 ########
-df <- df_ordem_compra %>%
+df <- df_ordem_compra_fim %>%
   inner_join(df_compra, join_by(order_id))
 
 ##########
-df_ordem_compra %>% 
+df_ordem_compra_fim %>% 
   ggplot(aes(y = len_comentario, x = as_factor(review_score), fill = colocou_titulo)) +
   geom_boxplot()
 
-df_ordem_compra %>% 
+df_ordem_compra_fim %>% 
   ggplot(aes(y = len_comentario, x = as_factor(review_score), fill = colocou_exc)) +
   geom_boxplot()
+
+# Logo, atraso na entrega, regiao_cliente nao interfere tanto
+df_ordem_compra_fim %>% 
+  ggplot(aes(y = len_comentario, x = as_factor(review_score), fill = primeira_compra_cliente)) +
+  geom_boxplot()
+
+df_ordem_compra_fim %>% 
+  ggplot(aes(y = log_valor_medio_parcela, x = as_factor(review_score), fill = primeira_ordem_por_cliente)) +
+  geom_boxplot()
+
+quant_dia <- df %>% # valor da no msm
+  group_by(dia = as.Date(order_purchase_timestamp)) %>% 
+  summarise(
+    n = n()
+  )
+
+plot(
+  x = t(quant_dia$dia),
+  y = quant_dia$n,
+  type = 'l'
+)
+
+
 ```
 
 \newpage
