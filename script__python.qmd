@@ -1,0 +1,994 @@
+---
+title: "Case Olist Brasil"
+author: "Nathalia Santos"
+date: today
+date-format: "DD/MM/YYYY"
+format: 
+  html:
+    self-contained: true
+    fig-height: 8
+    fig-width: 10
+toc: true
+number-sections: true
+toc-title: "Tópicos" 
+lang: "pt-BR"
+code-tools: true
+code-fold: true
+code-line-numbers: true
+resources: 
+  - "_src/src.R"
+code-summary: 'CODE'
+editor_options: 
+  chunk_output_type: console
+execute:
+  echo: false
+  warning: false
+---
+
+# Processamento e tratamento de dados
+```{python}
+#globals().clear() # limpa ambiente
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+#from plotnine import ggplot, aes, geom_point, labs, geom_boxplot
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+
+pd.set_option("display.max_columns", None)
+```
+
+```{r}
+library(tidyverse)
+library(reticulate)
+## carregando funções auxiliares
+source("_src/src.R")
+```
+
+```{python}
+# Leitura dos dados
+df_pagamentos = pd.read_csv("olist_dados/archive/olist_order_payments_dataset.csv")
+pag_menos_freq = df_pagamentos["payment_type"].value_counts().idxmin()
+pag_mais_freq = df_pagamentos["payment_type"].value_counts().idxmax()
+df_pagamentos["payment_type"] = df_pagamentos["payment_type"].replace(pag_menos_freq, pag_mais_freq)
+
+# para descritiva
+df_tipo_pagamento = (df_pagamentos
+    .groupby("payment_type")
+    .agg(
+        n=("payment_type","count"),
+        log_valor_pago=("payment_value", lambda x: np.log(x.sum()+1))
+    )
+    .reset_index()
+)
+
+
+# Forma de pagamento
+df_forma_pag = (df_pagamentos
+    .groupby(["order_id", "payment_type"])
+    .size()
+    .reset_index(name="n")
+    .pivot(index="order_id", columns="payment_type", values="n")
+    .fillna(0)
+    .reset_index()
+    .rename_axis(None, axis=1)
+)
+df_forma_pag["soma_tipos_pagamentos"] = df_forma_pag.filter(like="_card").sum(axis=1)
+
+# Registro de pagamento
+df_registro = (df_pagamentos
+    .groupby("order_id")
+    .agg(
+        ex_pago_escala_original=("payment_value","sum"),
+        log_valor_pago=("payment_value", lambda x: np.log(x.sum()+1)),
+        pago_a_vista=("payment_sequential", lambda x: 1 if x.max() == 1 else 0),
+        log_valor_medio_parcela=("payment_value", lambda x: np.log(x.mean()+1))
+    )
+    .reset_index()
+)
+
+df_log_exemplo = df_registro[['order_id','ex_pago_escala_original', 'log_valor_pago']] # auxiliar
+df_log = df_log_exemplo.melt(id_vars=['order_id'], var_name='variavel', value_name='valor')
+
+# Dados dos pedidos
+df_pedidos = pd.read_csv("olist_dados/archive/olist_orders_dataset.csv", parse_dates=["order_purchase_timestamp", "order_approved_at", "order_delivered_customer_date", "order_estimated_delivery_date"])
+data_atual = pd.to_datetime("2018-05-31")
+
+df_pedidos["dia_pedido"] = df_pedidos["order_purchase_timestamp"].dt.day_name()
+df_pedidos["tempo_conf_pedido"] = np.where(
+    df_pedidos["order_approved_at"].isna(),
+    (data_atual - df_pedidos["order_purchase_timestamp"]).dt.days,
+    (df_pedidos["order_approved_at"] - df_pedidos["order_purchase_timestamp"]).dt.days
+)
+df_pedidos["atraso_prev_entrega"] = np.where(
+    (df_pedidos["order_estimated_delivery_date"].isna()) &
+    ((data_atual - df_pedidos["order_delivered_customer_date"]).dt.days <= 0),
+    1,
+    np.where(
+        (~df_pedidos["order_estimated_delivery_date"].isna()) &
+        ((df_pedidos["order_estimated_delivery_date"] - df_pedidos["order_delivered_customer_date"]).dt.days <= 0),
+        1,
+        0
+    )
+)
+
+# Dados dos clientes
+df_cliente = pd.read_csv("olist_dados/archive/olist_customers_dataset.csv")
+df_cliente["regiao_cliente"] = np.select(
+    [
+        df_cliente["customer_state"].isin(["SP"]),
+        df_cliente["customer_state"].isin(["MG", "RJ", "ES"]),
+        df_cliente["customer_state"].isin(["PR", "RS", "MS"]),
+        df_cliente["customer_state"].isin(["DF", "GO", "MT"])
+    ],
+    ["SP", "Sudeste_SP", "Sul", "Centro_Oeste"],
+    default="NorteNordeste"
+)
+
+# Dados das avaliações
+df_avalia = pd.read_csv("olist_dados/archive/olist_order_reviews_dataset.csv")
+df_avalia["len_titulo"] = df_avalia["review_comment_title"].str.len().fillna(0).astype(int)
+df_avalia["len_comentario"] = df_avalia["review_comment_message"].str.len().fillna(0).astype(int)
+df_avalia["comentario_exc"] = df_avalia["review_comment_message"].str.count("!").fillna(0).astype(int)
+df_avalia["colocou_titulo"] = np.where(df_avalia["len_titulo"] > 0, 1, 0)
+df_avalia["colocou_exc"] = np.where(df_avalia["comentario_exc"] > 0, 1, 0)
+
+# União das tabelas
+df_ordem_compra = (
+    df_forma_pag
+    .merge(df_registro, on="order_id")
+    .merge(df_pedidos, on="order_id")
+    .merge(df_avalia, on="order_id")
+    .merge(df_cliente, on="customer_id")
+)
+
+# Análise da primeira compra
+df_ordem_primeira_compra = (df_ordem_compra
+    .groupby("customer_unique_id")
+    .agg(
+        data_prim_compra=("order_purchase_timestamp", "min"),
+        data_ultima_compra=("order_purchase_timestamp", "max"),
+        primeira_compra_cliente=("order_id", lambda x: 0 if len(x) > 1 else 1)
+    )
+    .reset_index()
+)
+
+df_ordem_compra_fim = (
+    df_ordem_compra
+    .merge(df_ordem_primeira_compra, on="customer_unique_id")
+    .assign(
+        primeira_ordem_por_cliente=lambda x: np.where(
+            x["data_prim_compra"] == x["order_purchase_timestamp"],
+            "Primeira",
+            np.where(
+                x["data_ultima_compra"] == x["order_purchase_timestamp"],
+                "Ultima",
+                "2oumais"
+            )
+        )
+    )
+)
+```
+
+> Comentários:
+
+- Deixei o formato comprido (wider) para conseguir representar informações categoricas como numeral de forma mais eficiente e para destrinchar informações das ordens para agrupar por cliente
+- Tipo de pagamento indefinido foi usado o tipo mais frequente (Menos frequente: `r py$pag_menos_freq` e Mais frquente: `r py$pag_mais_freq`)
+- Pedidos cancelados ou coisas do tipo foram mantidos pois guardam informação parcial de que o cliente 'estava disposto a comprar tal item'
+- Tranformou-se os dados de precificação em log-escala para normalizar os dados: 
+
+```{r}
+#| fig-cap: 'Densidade por tipo de dado' 
+data = py$df_log
+
+ggplot(data, aes(x = valor, fill = variavel)) +
+  geom_density(alpha = 0.5) +  
+  labs(x = "Valor", y = "Densidade") +
+  scale_fill_manual(values = c("ex_pago_escala_original" = "blue", "log_valor_pago" = "red")) +
+  scale_x_continuous(limits = c(-1, 100)) +  
+  theme_minimal() 
+```
+
+- Por haver poucos clientes que compraram mais de uma vez, e ainda menos que compraram mais de 2 vezes. Algumas vezes optei por tratar como binário: ter sido ou não primeira compra, por exemplo
+
+```{python}
+# Itens e produtos
+df_items = pd.read_csv("olist_dados/archive/olist_order_items_dataset.csv")
+df_items["log_price"] = np.log(df_items["price"])
+df_items["log_frete"] = np.log(df_items["freight_value"] + 1)
+df_items_agg = (df_items
+    .groupby("order_id")  
+    .agg(
+        produtos_por_pedido=("order_item_id", "count"),  
+        log_price_pedido=("log_price", "sum"),          
+        log_frete_pedido=("log_frete", "sum"),          
+        log_price_medio_pedido=("log_price", "mean")    
+    )
+    .reset_index()
+)
+
+# Produtos
+df_prod = pd.read_csv("olist_dados/archive/olist_products_dataset.csv")
+
+n_categoria_incial = len(df_prod.product_category_name.unique()) # auxiliar tabela
+n_categoria_incial_nula = df_prod.product_category_name.isnull().sum() # auxiliar tabela
+
+df_prod['categorias_novas_produtos'] = np.where(
+      df_prod['product_category_name'].str.contains("ferramentas", na=False), "CONSTRUCAO_FERRAMENTAS", 
+    np.where(
+      df_prod['product_category_name'].str.contains("fashion_", na=False),"FASHION",
+    np.where(
+      df_prod['product_category_name'].str.contains("moveis_", na=False), "MOVEIS",
+    np.where(
+      df_prod['product_category_name'].str.contains("eletrodomesticos", na=False), "ELETRODOMESTICOS",
+    np.where(
+      df_prod['product_category_name'].str.contains("dvd", na=False), "MIDIA_MUSICA",
+    np.where(
+      df_prod['product_category_name'].str.contains("pc", na=False), "INFORMATICA_ACESSORIOS",
+    np.where(
+      df_prod['product_category_name'].str.contains("industria", na=False), "INDUSTRIA",
+    np.where(
+      df_prod['product_category_name'].str.contains("musica", na=False), "MIDIA_MUSICA",
+    np.where(
+      df_prod['product_category_name'].str.contains("portateis", na=False), "PORTATEIS",
+    np.where(
+      df_prod['product_category_name'].str.contains("livros", na=False), "PAPELARIA",
+    np.where(
+      df_prod['product_category_name'].str.contains("telefonia", na=False), "TELEFONIA",
+    np.where(
+      df_prod['product_category_name'].str.contains("artigo", na=False), "EVENTO",
+    np.where(
+      df_prod['product_category_name'].str.contains("casa", na=False), "CASA",
+    np.where(
+      df_prod['product_category_name'].str.contains("artes", na=False), "ARTESANATO_LEGAL",
+    np.where(
+      df_prod['product_category_name'].str.contains("segur", na=False), "SEGURANCA",
+    np.where(
+      df_prod['product_category_name'].str.contains("bebida", na=False), "ALIMENTO",
+    df_prod['product_category_name']
+))))))))))))))))
+
+df_prod['categorias_novas_produtos'] = df_prod['categorias_novas_produtos'].replace(
+  {"papelaria": 'PAPELARIA'
+  ,'cine_foto': "MIDIA_MUSICA"
+  ,'fraldas_higiene': 'bebes'
+  ,'audio': "MIDIA_MUSICA"
+  ,'consoles_games': "PC"
+  ,'alimentos': "ALIMENTO"
+  ,'flores': "ALIMENTO"
+  ,'casa_construcao': "CONSTRUCAO_FERRAMENTAS"
+  ,'eletroportateis': "PORTATEIS"
+  ,'utilidades_domesticas': "CASA"
+  ,'cama_mesa_banho': "CASA"
+  ,'climatizacao': "CASA"
+  ,'la_cuisine': "CASA"
+  ,'eletronicos': "INFORMATICA_ACESSORIOS"
+  ,'tablets_impressao_imagem': "INFORMATICA_ACESSORIOS"
+  ,'cool_stuff': "ARTESANATO_LEGAL"}
+)
+
+df_prod.categorias_novas_produtos = df_prod.categorias_novas_produtos.str.upper()
+
+# tabela auxiliar
+tab_freq_cat = (df_prod.groupby('product_category_name').size().reset_index())
+tab_freq_cat.columns = ['categorias', 'n']
+tab_freq_cat['tipo'] = 'Antes'
+
+#--------- Tratamento categorias nulas
+# uma linnha de bebe tinha medidas nulas. Vamos susbituir pela media
+df_bb_nulo = df_prod[(df_prod['product_weight_g'].isnull()) & (df_prod['categorias_novas_produtos'] == 'BEBES')]
+indice = df_bb_nulo.index
+tamanho = df_bb_nulo.product_name_lenght.iloc[0]
+desc = df_bb_nulo.product_description_lenght.iloc[0]
+quant = df_bb_nulo.product_photos_qty.iloc[0]
+
+df_prod_bb = df_prod[
+  (df_prod['categorias_novas_produtos'] == 'BEBES') & 
+  (df_prod['product_name_lenght'] >= tamanho) & 
+  (df_prod['product_description_lenght'] >= desc) & 
+  (df_prod['product_photos_qty'] >= quant)
+]
+
+nomes_colunas_substituicao=['product_weight_g','product_length_cm','product_height_cm','product_width_cm']
+valores_estimados = df_prod_bb[nomes_colunas_substituicao].mean()
+for coluna in nomes_colunas_substituicao:
+  df_prod.loc[indice,coluna] = valores_estimados[coluna]
+
+# segundo tratamento ***
+#df_prod[df_prod['product_weight_g'].isnull()]
+
+# terceiro tratamento - trazendo info de avaliacao (existe associacao entre avaliacao e num de carac)
+df_reg= df_items.merge(df_prod, on="product_id").merge(df_avalia, on="order_id")
+colunas_reg = [
+  "product_id",'categorias_novas_produtos',
+  # info produto
+  'product_name_lenght','product_description_lenght', 'product_photos_qty', 'product_weight_g','product_length_cm', 'product_height_cm', 'product_width_cm',
+  # info preco
+  'log_price','log_frete',
+  # avalicao
+  'review_score','len_titulo', 'len_comentario','comentario_exc', 'colocou_titulo', 'colocou_exc'
+  ]
+
+df_reg = df_reg[colunas_reg]
+df_reg_dummy = pd.get_dummies('nota' + df_reg['review_score'].astype(str), dtype=int)
+df_reg = pd.concat([df_reg.drop('review_score', axis=1), df_reg_dummy], axis=1)
+
+# imputacao do restante das variaveis numericas quem nao tem categoria definida
+from sklearn.impute import SimpleImputer
+inpute = SimpleImputer(strategy='mean')
+df_reg.loc[:, ['product_name_lenght', 'product_description_lenght','product_photos_qty']] = inpute.fit_transform(df_reg[['product_name_lenght', 'product_description_lenght','product_photos_qty']])
+
+df_class = df_reg.dropna() # antes era df_prod
+df_faltante = df_reg[df_reg.isnull().sum(axis=1) > 0]
+
+# Corrigindo o agrupamento e ordenação
+df_faltante = (
+    df_faltante.groupby('product_id').agg(
+        product_name_lenght=("product_name_lenght", "mean"),  
+        product_description_lenght=("product_description_lenght", "mean"),          
+        product_photos_qty=("product_photos_qty", "mean"),          
+        product_weight_g=("product_weight_g", "mean"),
+        product_length_cm=("product_length_cm", "mean"),
+        product_height_cm=("product_height_cm", "mean"),
+        product_width_cm=("product_width_cm", "mean"),
+        log_price=("log_price", "mean"),
+        log_frete=("log_frete", "mean"),
+        len_titulo=("len_titulo", "mean"),
+        len_comentario=("len_comentario", "mean"),
+        comentario_exc=("comentario_exc", "max"),
+        colocou_titulo=("colocou_titulo", "max"),  # Binária: max captura se há algum 1
+        colocou_exc=("colocou_exc", "max"),
+        nota1=("nota1", "max"),  # Assumindo que as notas sejam binárias ou escalares
+        nota2=("nota2", "max"),
+        nota3=("nota3", "max"),
+        nota4=("nota4", "max"),
+        nota5=("nota5", "max")
+    ).reset_index()  # Garante que 'product_id' volte como coluna
+)
+```
+- Foi usado imputação de dados em alguns momentos para não perder informação
+
+```{python}
+# - imputacao categorica
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split 
+from sklearn import metrics 
+
+# Processo de Classificacao Dummy 
+codigos = pd.factorize(df_class.categorias_novas_produtos) # atribui indices as classes
+df_class['numero_categorias_novas_produtos'] = codigos[0]
+categorias = codigos[1]
+
+y = df_class['numero_categorias_novas_produtos']
+x = df_class.drop(['numero_categorias_novas_produtos','categorias_novas_produtos','product_id'], axis=1)
+
+x_treino, x_teste, y_treino, y_teste = train_test_split(x, y, test_size=0.3, random_state=1)
+
+scaler = StandardScaler()
+x_treino = scaler.fit_transform(x_treino)
+x_teste = scaler.transform(x_teste)
+
+classificador_arvoredecisao = RandomForestClassifier(n_estimators = 10, criterion = 'entropy', random_state = 1)
+classificador_arvoredecisao.fit(x_treino, y_treino)
+
+y_pred = classificador_arvoredecisao.predict(x_teste)
+categoria_nominal_prevista = dict(zip(range(len(categorias)+1),categorias))
+
+# Matriz de confusao
+y_teste_resposta = np.vectorize(categoria_nominal_prevista.get)(y_teste)
+y_pred = np.vectorize(categoria_nominal_prevista.get)(y_pred)
+matriz = pd.crosstab(y_teste_resposta, y_pred, rownames=['Real'], colnames=['Predito'])
+acuracia = np.trace(matriz) / np.sum(matriz.values)
+
+# Substituicao
+new_x = df_faltante.drop('product_id', axis=1).fillna(0)
+new_y_pred = classificador_arvoredecisao.predict(
+  scaler.fit_transform(new_x)
+)
+
+df_faltante['categorias_novas_produtos'] = np.vectorize(categoria_nominal_prevista.get)(new_y_pred)
+
+df_prod_final = pd.concat(
+    [df_prod[df_prod.isnull().sum(axis=1) == 0].drop('product_category_name',axis=1), 
+     df_faltante[df_prod.drop('product_category_name',axis=1).columns]],  # Dado nulo estimado
+    ignore_index=True  
+)
+
+df_prod_final['volume_prod'] = (
+    df_prod_final.product_length_cm.fillna(0) * 
+    df_prod_final.product_height_cm.fillna(0) * 
+    df_prod_final.product_width_cm.fillna(0)
+)
+
+
+df_compra = df_items.merge(df_prod_final, on="product_id").drop(
+  ['product_id','seller_id','shipping_limit_date','price','freight_value'],axis=1)
+  
+df_dummy_compra = pd.get_dummies(df_compra.categorias_novas_produtos, dtype=int)
+df_compra_final = pd.concat([df_compra, df_dummy_compra], axis=1).drop('categorias_novas_produtos', axis=1)
+
+
+## compras e ordens
+df_compra_ordem = df_compra.merge(df_ordem_compra_fim, on = 'order_id')
+
+# Valores auxiliares
+n_categoria_final = len(df_prod_final.categorias_novas_produtos.unique())
+n_categoria_final_nula = df_prod_final.categorias_novas_produtos.isnull().sum() # auxiliar tabela
+# tabela auxiliar
+tab_freq_cat_dp = (df_prod_final.groupby('categorias_novas_produtos').size().reset_index())
+tab_freq_cat_dp.columns = ['categorias', 'n']
+tab_freq_cat_dp['tipo'] = 'Depois'
+
+tab_freq_cat_final = pd.concat([tab_freq_cat,tab_freq_cat_dp])
+```
+
+|Descrição |Antes | Depois |
+|----------|------|--------|
+| Categorias de produtos|`{r} py$n_categoria_incial` |`{r} py$n_categoria_final` |
+| Categorias de produtos nulas|`{r} py$n_categoria_incial_nula` |`{r} py$n_categoria_final_nula` 
+
+> Resumo do que foi usado aqui para prever as classes:
+
+- Método: Floresta Aleatória para classificação
+- Acurácia: `r round(py$acuracia*100, 2)`%
+- Ideia aqui foi usar os dados de avaliação dos produtos para ajudar a melhorar a categorização de qual categoria pertenceria o valores de dimensão do produto (peso, altura, comprimento...)
+- Para os dados numéricos que faltavam de informações do anúncio do produto (tamanho do título, quantidade de fotos e tamanho da descrição), usou-se a média. Esses dados entraram na Árvore 
+
+
+```{r}
+data = py$tab_freq_cat_final
+
+data$categorias <- factor(data$categorias, 
+                         levels = data$categorias[order(data$n, decreasing = TRUE)])
+
+
+ggplot(data %>% filter(tipo=='Antes'), 
+       aes(x = categorias, y = n, fill = tipo)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +  # Rotaciona
+  labs(x = "Categoria", y = "Valor", title = "Gráfico de Barras") + 
+  theme_minimal()  
+
+ggplot(data %>% filter(tipo=='Depois'), 
+       aes(x = categorias, y = n, fill = tipo)) +
+  geom_bar(stat = "identity", fill = '#32A4A8') +
+  coord_flip() +  # Rotaciona
+  labs(x = "Categoria", y = "Valor", title = "Gráfico de Barras") + 
+  theme_minimal()  
+```
+
+```{python}
+fig, ax = plt.subplots(figsize=(20,10))  
+sns.heatmap(matriz, vmax=1., square=False).xaxis.tick_top()
+plt.xticks(rotation=90)
+plt.show()
+```
+
+```{python}
+# União final - quase modelo
+df = df_ordem_compra_fim.merge(df_compra_final, on="order_id").drop(
+  ['review_comment_title', 'review_comment_message'], axis=1)
+
+
+colunas_finais = ['order_id', 'boleto', 'credit_card', 'debit_card', 'voucher',
+       'soma_tipos_pagamentos', 'log_valor_pago', 'pago_a_vista',
+       'log_valor_medio_parcela', 'customer_id',
+       'order_purchase_timestamp', 
+       'dia_pedido', 'tempo_conf_pedido',
+       'atraso_prev_entrega', 'review_score',
+       'review_creation_date', 'len_titulo',
+       'len_comentario', 'comentario_exc', 'colocou_titulo', 'colocou_exc',
+       'customer_unique_id', 'customer_city',
+       'customer_state', 'regiao_cliente', 'data_prim_compra',
+       'data_ultima_compra', 'primeira_compra_cliente',
+       'primeira_ordem_por_cliente', 'log_price', 'log_frete',
+       'product_name_lenght', 'product_description_lenght',
+       'product_photos_qty', 'product_weight_g', 'product_length_cm',
+       'product_height_cm', 'product_width_cm', 'volume_prod', 'ALIMENTO',
+       'ARTESANATO_LEGAL', 'AUTOMOTIVO', 'BEBES', 'BELEZA_SAUDE', 'BRINQUEDOS',
+       'CASA', 'CONSTRUCAO_FERRAMENTAS', 'ELETRODOMESTICOS', 'ESPORTE_LAZER',
+       'EVENTO', 'FASHION', 'INDUSTRIA', 'INFORMATICA_ACESSORIOS',
+       'MALAS_ACESSORIOS', 'MARKET_PLACE', 'MIDIA_MUSICA', 'MOVEIS',
+       'PAPELARIA', 'PC', 'PERFUMARIA', 'PET_SHOP', 'PORTATEIS',
+       'RELOGIOS_PRESENTES', 'SEGURANCA', 'TELEFONIA']
+
+df_final = df[colunas_finais]
+```
+
+## Resumo dados 
+
+```{python}
+df_prod.describe().round(2).transpose()
+df_items.describe().round(2).transpose()
+```
+
+
+# Descritiva
+
+> Forma de pagamento do cliente:
+
+```{r}
+# | fig-cap: "Número de Transações e Log do Valor Pago por Tipo de Pagamento"
+data = py$df_tipo_pagamento
+
+data$payment_type <- reorder(data$payment_type, -data$n)
+
+ggplot(data, aes(x = payment_type)) +
+  geom_bar(aes(y = n/1000, fill = payment_type), stat = "identity", show.legend = FALSE) +
+  geom_line(aes(y = log_valor_pago, group = 1), color = "black", size = 1) +  
+  geom_point(aes(y = log_valor_pago), color = "black", size = 3) +  
+  scale_y_continuous(name = "Número de pagamentos (em milhares)", sec.axis = sec_axis(~./1, name = "Log do Valor Pago")) + 
+  labs(x = "Tipo de Pagamento") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+data = py$df_registro
+ggplot(data= data) + 
+  geom_boxplot(aes(y = log_valor_medio_parcela, fill = as.factor(pago_a_vista))) +
+  labs(y = 'log da parcela mensal', fill = 'Pagamento a vista') + 
+  theme_minimal()
+
+data = py$df_ordem_compra_fim %>% 
+  mutate(
+    primeira_compra_cliente = ifelse(primeira_compra_cliente==0,"Cliente Recorrente", "Cliente Novo")
+  )
+ggplot(data= data) + 
+  geom_boxplot(aes(y = log_valor_medio_parcela, fill = as.factor(pago_a_vista))) +
+  labs(y = 'log da parcela mensal', fill = 'Pagamento a vista') + 
+  facet_wrap(~primeira_compra_cliente) + 
+  theme_minimal()
+```
+
+* Aqui parece haver uma possível mudança de comportamento do preço de compra entre a primeira e a segunda compra
+
+
+```{r}
+data = py$df_compra
+
+ggplot(data= data %>% arrange(-log_price))+
+  geom_boxplot(aes(y = log_price, x = categorias_novas_produtos)) +
+  geom_hline(yintercept = mean(data$log_price), color = "red", linetype = "dashed", size = 1) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  labs(y = 'Log-Preço', x = 'categoria', title = 'Comportamento Geral')
+```
+
+
+```{r}
+data = py$df_compra_ordem %>% 
+  mutate(
+    primeira_compra_cliente = ifelse(primeira_compra_cliente==0,"Cliente Recorrente", "Cliente Novo")
+  )
+ggplot(data= data %>% arrange(-log_price))+
+  geom_boxplot(aes(y = log_price, x = categorias_novas_produtos)) +
+  geom_hline(yintercept = mean(data$log_price), color = "red", linetype = "dashed", size = 1) +
+  facet_wrap(~primeira_compra_cliente) + 
+    theme_light() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{python}
+# | fig-cap: 'Proporção de pedidos por dia da semana'
+tab_perc_dia = (
+    df_ordem_compra_fim
+    .groupby(["dia_pedido", "primeira_compra_cliente"])
+    .size()
+    .reset_index(name="n")
+    .pivot(index="dia_pedido", columns="primeira_compra_cliente", values="n")
+    .fillna(0)
+    .reset_index()
+    .rename_axis(None, axis=1)
+)
+
+total_dia = tab_perc_dia.drop(columns=["dia_pedido"]).sum(axis=0)
+
+for col in tab_perc_dia.columns[1:]:  # Ignora a coluna 'dia_pedido'
+    tab_perc_dia[col] = round((tab_perc_dia[col] / total_dia[col]) * 100, 2)
+
+tab_perc_dia.columns = ['Dia do Pedido', 'Cliente Novo', 'Cliente Recorrente']
+tab_perc_dia
+```
+
+```{r}
+py$df_ordem_compra %>% 
+    ggplot(aes(y = len_comentario, x = as_factor(review_score), fill = as_factor(colocou_exc))) +
+    geom_boxplot() + 
+   labs(y = 'Avaliação', x = 'Tamanho do comentário', fill = 'Ter colocado !')
+```
+
+> Itens mais frequentes comprados em um mesmo pedido
+
+```{python}
+df_resultado = (df_compra.groupby(['order_id', 'categorias_novas_produtos'])
+  .size()
+  .reset_index(name='n')
+  .pivot(index="order_id", columns="categorias_novas_produtos", values="n")
+  .fillna(0)
+  .reset_index()
+  .rename_axis(None, axis=1)
+)
+df_resultado['itens_por_ordem'] = df_resultado.drop({'order_id'}, axis = 'columns').sum(axis = 'columns')
+
+df_resultado.describe().round(2).transpose()
+```
+
+## Teste de Hipótese
+
+::: callout-important
+## Ponto alvo
+
+Variáveis que contribuiem para o aumento do valor de compra dos clientes
+:::
+
+* Conclusão aqui é que oferecer voucher não gera efeito significativo no aumento do valor que o cliente gasta na **Olist**.
+```{r}
+data = py$df_compra_ordem
+data = data %>%
+  select(log_price, log_frete, soma_tipos_pagamentos, boleto, credit_card, debit_card,
+         pago_a_vista, dia_pedido, regiao_cliente, len_titulo, volume_prod,
+         categorias_novas_produtos, review_score, primeira_compra_cliente, voucher) %>%
+  drop_na() %>% 
+  mutate(
+    review_score = as.factor(review_score),
+    boleto = as.factor(boleto),
+    credit_card = as.factor(credit_card),
+    debit_card = as.factor(debit_card),
+    pago_a_vista = as.factor(pago_a_vista),
+    primeira_compra_cliente = as.factor(primeira_compra_cliente)
+  )
+
+fit = aov(formula = log_price ~ 
+            log_frete + soma_tipos_pagamentos + boleto + credit_card + debit_card +
+            pago_a_vista+dia_pedido+regiao_cliente+len_titulo+volume_prod +
+            categorias_novas_produtos  + review_score +
+            primeira_compra_cliente*categorias_novas_produtos +voucher, data = data)
+interpreta_ANOVA(fit)
+
+anova(fit, update(fit, ~. -voucher))
+```
+
+### Qual categoria está contribuindo mais para o valor gasto do cliente?
+
+> Quando compara-se **TER COMPRADO ANTERIORMENTO VS CATEGORIA DE PRODUTO** (fiz um recorte para *pet-shop*)
+
+```{=tex}
+\documentclass{article}
+\usepackage{amsmath}
+
+\begin{document}
+
+\begin{eqnarray}
+    Fator_2: \left\{
+    \begin{array}{ll}
+        0 & \text{se o cliente já fez compras anteriores (não é a primeira compra)} \\
+        1 & \text{se o cliente está realizando sua primeira compra}
+    \end{array}
+    \right.
+    \nonumber
+\end{eqnarray}
+
+\end{document}
+
+```
+
+
+- Alimento e pet-shop, se a primeira compra gasta-se mais com pet-shop, a próxima será com alimentação e vice-versa. Caso ambas estejam na mesma compra, gasta-se mais com alimentação
+- Artesanato supera pet-shop sempre, exceto quando ambos são comprados em compras futuras, aí são iguais na contribuição do gasto do cliente na loja 
+- Itens de casa se sobressaem dos itens de pet-shop na primeira compra. Quando se gasta mais em pet-shop, parece implicar que a pessoa passa a gastar menos com itens de casa. Algo similar é concluído para eletrodomésticos, acessórios de informática e PC's.
+- Pet-shop supera itens de telefonia em todos os casos de compra
+- Pet-shop perde para portáteis em todos os casos de compra, ou seja, o gasto com portáteis supera esse item tanto na primeira quanto na segunda compra. 
+
+
+- Pet-shop só se sobressai de itens de beleza e saúde quando já foi comprado anteriormente
+- Pet-shop sempre perde para itens de fashion (roupas), exceto quando já se tenha comprado anteriormente
+
+
+::: callout-tip
+**Possíveis Estratégias para vender mais itens de Pet-Shop:**
+
+- Parece que o cliente alvo para os itens de pet-shop, gasta mais com esses itens depois que estão com seus itens básicos já adquiridos em suas primeiras compras. Depois de garantir seus itens básicos e gastar com seus pets, esse cliente está mais apto a gastar mais com artesanato, 'coisas legais' e itens de viagem, por exemplo.
+:::
+
+
+```{r}
+# So categoricas aqui
+data_aov =  data %>%
+  select(
+    log_price,  # Inclui log_price sempre
+    where(~ is.factor(.) | is.character(.))  # Seleciona as colunas categóricas
+  )
+
+fit_final = fit = aov(formula = log_price ~ 
+            boleto + credit_card + debit_card +
+            pago_a_vista+dia_pedido+regiao_cliente+
+            categorias_novas_produtos  + review_score +
+            primeira_compra_cliente*categorias_novas_produtos, data = data_aov)
+
+tukey_result_teste <- TukeyHSD(fit_final)
+tukey_result <- Arruma_CompMult(tukey_result_teste)
+
+tukey_amostra <- tukey_result$`categorias_novas_produtos:primeira_compra_cliente` %>%
+  filter(grepl("PET_SHOP", Fator1))
+
+CompMult_visual(tukey_amostra)
+```
+
+**Abaixo será feita uma análise marginal de pet-shop, ou seja, desconsiderando a ordem da compra:**
+
+Aqui vemos uma análise mais direta do que já foi concluído acima: 
+
+- Gasta-se mais com Pet-shop em relação a itens de consumo domésticos
+- Gasta-se menos com Pet-shop em relação a itens de desejo, como artigos de viagem e artesanato
+
+```{r}
+CompMult_visual(
+  tukey_result$categorias_novas_produtos%>%
+  filter(grepl("PET_SHOP", Fator1))
+  )
+```
+
+## Outras análises mais diretas:
+
+### Gasto vs Avaliação {#sec-gasto_ava}
+
+- Clientes que gastam mais ou em produtos mais caros tendem a gostar mais de sua experiência de compra
+- **Clientes que avaliam em nota máxima e mínima gastam de forma igual. Isso pode ser indicativo que há outras variáveis que se associam ao gasto e a satisfação do cliente**
+```{r}
+CompMult_visual(
+  tukey_result$review_score
+  )
+```
+
+### Gasto vs Primeira compra 
+
+- De fato, gasta-se mais na primeira compra. Como a @sec-gasto_ava mostrou que satisfação não está associada ao gasto, é importante garantir outros incentivos além da boa experiência para o cliente na sua compra.
+```{r}
+CompMult_visual(
+  tukey_result$primeira_compra_cliente
+  )
+```
+
+### Gasto vs Região
+
+Em relação aos gastos:
+
+$$NorteNordeste >  Sudeste-SP = Centro-Oeste > Sul > SP$$
+
+* Nesse caso, também indicou que $Sudeste-SP = Sul$ mas $Centro-Oeste \neq Sul$ o que é um pouco contraintuitivo, mas talvez numa amostra maior, ou considerando interações, seria possível afirmar em quais condições faz com que Centro-Oeste e Sul se diferenciem.
+
+```{r}
+CompMult_visual(
+  tukey_result$regiao_cliente
+  )
+```
+
+### Gasto vs Dia da compra
+
+Domingo é o pior dia de compra, quando pensa-se em gasto médio, seguido por sábado.
+
+```{r}
+CompMult_visual(
+  tukey_result$dia_pedido
+  )
+```
+
+### Gasto vs Forma de pagamento
+
+* Pessoas que optam por boleto, gastam menos
+
+```{r}
+CompMult_visual(
+  tukey_result$boleto
+  )
+```
+
+* Pessoas que optam por cartão de crédito e a usam em mais parcelas, gastam mais
+
+```{r}
+CompMult_visual(
+  tukey_result$credit_card
+  )
+```
+
+* Pessoas que optam por cartão de débito, gastam mais
+
+```{r}
+CompMult_visual(
+  tukey_result$debit_card
+  )
+```
+
+::: callout-tip
+**Possíveis Estratégias para vender mais itens de Pet-Shop nas demais análises:**
+
+- Incentivar o uso do cartão de crédito e o parcelamento da compra poderia gerar mais oportunidade do cliente gastar mais na loja. Promoções no meio de semana são igualmente eficazes para aumentar o ticket-médio do cliente. Aproveitar a primeira compra do cliente para arrecadar mais em sua compra, mas também garantir que ele volte para gastar com itens de desejo ao invés de apenas artigos de necessidade imediata refletirão de forma positiva no gasto do cliente na loja. Por fim, aumentar a exposição no mercado Norte-Nordeste parece gerar um crescimento mais significativo que nas demais regiões.
+
+:::
+
+# Agrupamento de clientes
+
+```{python}
+df_pca_dummy = pd.get_dummies(df_final['regiao_cliente'], dtype=int)
+df_pca = pd.concat([df_final.drop('regiao_cliente', axis=1), df_pca_dummy], axis=1)
+
+colunas_pca = ['boleto', 'credit_card', 'debit_card', 'voucher',
+       'soma_tipos_pagamentos', 'log_valor_pago', 'pago_a_vista',
+       'log_valor_medio_parcela','tempo_conf_pedido', 'atraso_prev_entrega',
+       'review_score', 'len_titulo', 'len_comentario','comentario_exc', 'colocou_titulo',
+       'colocou_exc','primeira_compra_cliente','log_price', 'log_frete',
+       'product_name_lenght', 'product_description_lenght',
+       'product_photos_qty', 'product_weight_g', 'product_length_cm',
+       'product_height_cm', 'product_width_cm', 'volume_prod', 'ALIMENTO',
+       'ARTESANATO_LEGAL', 'AUTOMOTIVO', 'BEBES', 'BELEZA_SAUDE', 'BRINQUEDOS',
+       'CASA', 'CONSTRUCAO_FERRAMENTAS', 'ELETRODOMESTICOS', 'ESPORTE_LAZER',
+       'EVENTO', 'FASHION', 'INDUSTRIA', 'INFORMATICA_ACESSORIOS',
+       'MALAS_ACESSORIOS', 'MARKET_PLACE', 'MIDIA_MUSICA', 'MOVEIS',
+       'PAPELARIA', 'PC', 'PERFUMARIA', 'PET_SHOP', 'PORTATEIS',
+       'RELOGIOS_PRESENTES', 'SEGURANCA', 'TELEFONIA']
+
+# Imputando dados faltantes - df_pca[colunas_pca].isnull().sum()
+df_pca.loc[:, ['product_weight_g', 'product_length_cm','product_height_cm','product_width_cm']] = (
+  inpute.fit_transform(df_pca[['product_weight_g','product_length_cm','product_height_cm','product_width_cm']])
+  )
+  
+#df_pca.customer_unique_id 
+x_treino = df_pca[colunas_pca]
+
+pca = PCA()
+x_treino_escalado_pior_cenario = scaler.fit_transform(x_treino) # dados reescalados
+X_train_pca_pior_cenario = pca.fit_transform(x_treino_escalado_pior_cenario)
+melhor_comp_pior_cenario = round(np.max(pca.explained_variance_ratio_)*100,2)
+```
+
+
+```{python}
+df_corr = x_treino.corr()
+correlation_pairs = (# Transforma a matriz em formato longo
+    df_corr
+    .stack()  
+    .reset_index() 
+)
+correlation_pairs.columns = ['level_0', 'level_1', 'Correlation']
+correlation_pairs["pair"] = correlation_pairs.apply(
+  lambda row: tuple(sorted([row["level_0"], row["level_1"]])), axis=1)
+correlacao = correlation_pairs.drop_duplicates(subset="pair").drop(columns="pair")
+correlacao = correlacao.loc[(correlacao.level_0!=correlacao.level_1),]
+df_cor_final = correlacao.sort_values(by='Correlation', ascending=False).head(25)
+
+df_cor_long = (df_cor_final[['level_0', 'level_1']]
+    .melt(var_name="atributo", value_name="col")
+    .drop_duplicates(subset="col")
+    )
+    
+x_treino = x_treino.loc[:,x_treino.columns.isin(df_cor_long.col.unique())]
+```
+
+
+```{python}
+x_treino_escalado = scaler.fit_transform(x_treino) # dados reescalados
+X_train_pca = pca.fit_transform(x_treino_escalado )
+
+# Auxiliares
+Valor_Esperado_Minimo_inicial = round((1/np.sqrt(len(colunas_pca)))*100,2)
+Valor_Esperado_Minimo = round((1/np.sqrt(len(df_cor_long.col.unique())))*100,2)
+melhor_comp_melhorado_cenario =  round(np.max(pca.explained_variance_ratio_)*100,2)
+```
+
+- Usando todas variáveis, não alcançou explicabilidade mínima na variabilidade de pelo menos uma componente optei por tratar da PCA com as variáveis mais correlacionadas. Ganho:
+
+| Tipo e Cenário | Pior (todas variáveis) | Melhorado (mais correlacionadas) |
+|----------------|------------------------|---------------------------------|
+| Perc valor esperado mínimo componente | `r py$Valor_Esperado_Minimo_inicial` | `r py$Valor_Esperado_Minimo` |
+| Perc melhor componente | `r py$melhor_comp_pior_cenario` | `r py$melhor_comp_melhorado_cenario` |
+
+```{python}
+per_var = np.round(pca.explained_variance_ratio_*100, decimals=1)
+labels = [str(x) for x in range(1, len(per_var)+1)]
+
+df_resul_pca = pd.DataFrame({'per_var_acum':pca.explained_variance_ratio_.cumsum()*100, 'comp':pca.get_feature_names_out()})
+df_resul_pca
+```
+
+
+```{python}
+fig = plt.figure(figsize=(8,5))
+
+plt.plot(pca.explained_variance_ratio_*100,  'ro-', linewidth=2)
+plt.title('Scree Plot')
+plt.xlabel('Componente Principal')
+plt.ylabel('Autovalor')
+plt.axhline(y=Valor_Esperado_Minimo, color='r', linestyle='--', label='y=1')  # Linha vermelha em y=1, linha pontilhada
+plt.show()
+```
+
+```{python}
+df_pca_resultados = pca.transform(x_treino)
+new_x_treino = pd.DataFrame({
+    'customer_unique_id':df_pca.customer_unique_id
+    ,'c1': df_pca_resultados[:, 0]
+    ,'c2': df_pca_resultados[:, 1]
+    #,'c3': df_pca_resultados[:, 2]
+    #,'c4': df_pca_resultados[:, 3]
+})
+
+new_x_treino.describe()
+```
+
+
+```{python}
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import AgglomerativeClustering, KMeans
+from scipy.cluster import hierarchy
+
+n = 10000
+new_x_treino_reduzido = new_x_treino.head(n)
+tabela = new_x_treino_reduzido .drop('customer_unique_id', axis=1)
+#new_x_treino.sample(n=n, random_state=1)
+Z = hierarchy.linkage(tabela, 'complete')
+plt.figure(figsize=(18, 10))
+plt.grid(axis='y')
+dn = hierarchy.dendrogram(Z, labels=list(range(n)), leaf_font_size=8)
+
+# classes
+n_clusters = 3
+cluster = AgglomerativeClustering(n_clusters=n_clusters, linkage='ward')
+grupo = cluster.fit_predict(tabela)
+
+new_x_treino_reduzido = new_x_treino_reduzido.copy()
+new_x_treino_reduzido.loc[:, 'grupo'] = grupo
+```
+
+> Dos clientes únicos, o percentual alocado em cada cluster foi:
+
+
+```{python}
+n_grupo = new_x_treino_reduzido.groupby('grupo').size()
+(n_grupo / sum(n_grupo))*100
+```
+
+```{python}
+df_agrupamento = new_x_treino_reduzido.merge(df, on='customer_unique_id')
+```
+
+> Sobre sua localização:
+
+```{python}
+df_agrupamento_regiao = df_agrupamento.groupby(['grupo','regiao_cliente']).size().reset_index()
+df_agrupamento_regiao.columns = [ 'grupo', 'regiao_cliente','quant' ]
+df_agrupamento_regiao_pivot = df_agrupamento_regiao.pivot_table(
+    index='regiao_cliente',  
+    columns='grupo',         
+    values='quant',           
+    aggfunc='sum',            
+    fill_value=0 
+)
+```
+
+> Como se comportam em média nas compras
+
+```{python}
+df_agrupamento.groupby('grupo').agg(
+    colocou_titulo=('colocou_titulo', 'mean'),
+    len_titulo=('len_titulo', 'mean'),
+    len_comentario=('len_comentario', 'mean'),
+    colocou_exc=('colocou_exc', 'mean'),
+    credit_card=('credit_card', 'mean'),
+    tempo_conf_pedido=('tempo_conf_pedido', 'mean'),
+    atraso_prev_entrega=('atraso_prev_entrega', 'mean'),
+    product_photos_qty=('product_photos_qty', 'mean'),
+    product_name_lenght=('product_name_lenght', 'mean'),
+    product_description_lenght=('product_description_lenght', 'mean'),
+    volume_prod=('volume_prod', 'mean'),
+    md_log_price=('log_price', 'mean'),
+    sd_log_price=('log_price', 'std'),
+    review_score_maximo =('review_score', 'mean')
+).reset_index()
+```
+
+# Fim
