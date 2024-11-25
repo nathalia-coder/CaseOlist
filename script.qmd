@@ -141,6 +141,53 @@ df_items %>% group_by(order_id) %>%
 
 
 df_prod <- read_csv("olist_dados/archive/olist_products_dataset.csv")
+# Criar a coluna 'categorias_novas_produtos' com base em condições
+df_prod <- df_prod %>%
+  mutate(categorias_novas_produtos = case_when(
+    grepl("ferramentas", product_category_name, ignore.case = TRUE) ~ "CONSTRUCAO_FERRAMENTAS",
+    grepl("fashion_", product_category_name, ignore.case = TRUE) ~ "FASHION",
+    grepl("moveis_", product_category_name, ignore.case = TRUE) ~ "MOVEIS",
+    grepl("eletrodomesticos", product_category_name, ignore.case = TRUE) ~ "ELETRODOMESTICOS",
+    grepl("dvd", product_category_name, ignore.case = TRUE) ~ "MIDIA-MUSICA",
+    grepl("pc", product_category_name, ignore.case = TRUE) ~ "INFORMATICA_ACESSORIOS",
+    grepl("industria", product_category_name, ignore.case = TRUE) ~ "INDUSTRIA",
+    grepl("musica", product_category_name, ignore.case = TRUE) ~ "MIDIA-MUSICA",
+    grepl("portateis", product_category_name, ignore.case = TRUE) ~ "PORTATEIS",
+    grepl("livros", product_category_name, ignore.case = TRUE) ~ "PAPELARIA",
+    grepl("telefonia", product_category_name, ignore.case = TRUE) ~ "TELEFONIA",
+    grepl("artigo", product_category_name, ignore.case = TRUE) ~ "EVENTO",
+    grepl("casa", product_category_name, ignore.case = TRUE) ~ "CASA",
+    grepl("artes", product_category_name, ignore.case = TRUE) ~ "ARTESANATO-LEGAL",
+    grepl("segur", product_category_name, ignore.case = TRUE) ~ "SEGURANCA",
+    grepl("bebida", product_category_name, ignore.case = TRUE) ~ "ALIMENTO",
+    TRUE ~ product_category_name  # Caso nenhuma das condições seja atendida
+  ))
+
+# Substituir valores específicos na coluna 'categorias_novas_produtos'
+df_prod <- df_prod %>%
+  mutate(categorias_novas_produtos = recode(categorias_novas_produtos,
+    "papelaria" = "PAPELARIA",
+    "cine_foto" = "MIDIA-MUSICA",
+    "fraldas_higiene" = "BEBES",
+    "audio" = "MIDIA-MUSICA",
+    "consoles_games" = "PC",
+    "alimentos" = "ALIMENTO",
+    "flores" = "ALIMENTO",
+    "casa_construcao" = "CONSTRUCAO_FERRAMENTAS",
+    "eletroportateis" = "PORTATEIS",
+    "utilidades_domesticas" = "CASA",
+    "cama_mesa_banho" = "CASA",
+    "climatizacao" = "CASA",
+    "la_cuisine" = "CASA",
+    "eletronicos" = "INFORMATICA_ACESSORIOS",
+    "tablets_impressao_imagem" = "INFORMATICA_ACESSORIOS",
+    "cool_stuff" = "ARTESANATO-LEGAL"
+  ))
+
+# Converter para maiúsculas
+df_prod$categorias_novas_produtos <- toupper(df_prod$categorias_novas_produtos)
+
+
 df_prod %>% summary()
 
 df_logista <- read_csv("olist_dados/archive/olist_sellers_dataset.csv")
