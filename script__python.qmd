@@ -26,6 +26,7 @@ execute:
 ---
 
 # Processamento e tratamento de dados
+
 ```{python}
 #globals().clear() # limpa ambiente
 
@@ -173,10 +174,10 @@ df_ordem_compra_fim = (
 
 > Comentários:
 
-- Deixei o formato comprido (wider) para conseguir representar informações categoricas como numeral de forma mais eficiente e para destrinchar informações das ordens para agrupar por cliente
-- Tipo de pagamento indefinido foi usado o tipo mais frequente (Menos frequente: `r py$pag_menos_freq` e Mais frquente: `r py$pag_mais_freq`)
-- Pedidos cancelados ou coisas do tipo foram mantidos pois guardam informação parcial de que o cliente 'estava disposto a comprar tal item'
-- Tranformou-se os dados de precificação em log-escala para normalizar os dados: 
+-   Deixei o formato comprido (wider) para conseguir representar informações categoricas como numeral de forma mais eficiente e para destrinchar informações das ordens para agrupar por cliente
+-   Tipo de pagamento indefinido foi usado o tipo mais frequente (Menos frequente: `r py$pag_menos_freq` e Mais frquente: `r py$pag_mais_freq`)
+-   Pedidos cancelados ou coisas do tipo foram mantidos pois guardam informação parcial de que o cliente 'estava disposto a comprar tal item'
+-   Tranformou-se os dados de precificação em log-escala para normalizar os dados:
 
 ```{r}
 #| fig-cap: 'Densidade por tipo de dado' 
@@ -190,7 +191,7 @@ ggplot(data, aes(x = valor, fill = variavel)) +
   theme_minimal() 
 ```
 
-- Por haver poucos clientes que compraram mais de uma vez, e ainda menos que compraram mais de 2 vezes. Algumas vezes optei por tratar como binário: ter sido ou não primeira compra, por exemplo
+-   Por haver poucos clientes que compraram mais de uma vez, e ainda menos que compraram mais de 2 vezes. Algumas vezes optei por tratar como binário: ter sido ou não primeira compra, por exemplo
 
 ```{python}
 # Itens e produtos
@@ -347,7 +348,8 @@ df_faltante = (
     ).reset_index()  # Garante que 'product_id' volte como coluna
 )
 ```
-- Foi usado imputação de dados em alguns momentos para não perder informação
+
+-   Foi usado imputação de dados em alguns momentos para não perder informação
 
 ```{python}
 # - imputacao categorica
@@ -425,18 +427,17 @@ tab_freq_cat_dp['tipo'] = 'Depois'
 tab_freq_cat_final = pd.concat([tab_freq_cat,tab_freq_cat_dp])
 ```
 
-|Descrição |Antes | Depois |
-|----------|------|--------|
-| Categorias de produtos|`{r} py$n_categoria_incial` |`{r} py$n_categoria_final` |
-| Categorias de produtos nulas|`{r} py$n_categoria_incial_nula` |`{r} py$n_categoria_final_nula` 
+| Descrição | Antes | Depois |
+|------------------------------|------------------|------------------------|
+| Categorias de produtos | `{r} py$n_categoria_incial` | `{r} py$n_categoria_final` |
+| Categorias de produtos nulas | `{r} py$n_categoria_incial_nula` | `{r} py$n_categoria_final_nula` |
 
 > Resumo do que foi usado aqui para prever as classes:
 
-- Método: Floresta Aleatória para classificação
-- Acurácia: `r round(py$acuracia*100, 2)`%
-- Ideia aqui foi usar os dados de avaliação dos produtos para ajudar a melhorar a categorização de qual categoria pertenceria o valores de dimensão do produto (peso, altura, comprimento...)
-- Para os dados numéricos que faltavam de informações do anúncio do produto (tamanho do título, quantidade de fotos e tamanho da descrição), usou-se a média. Esses dados entraram na Árvore para melhorar previsão de categorias dos prodtos
-
+-   Método: Floresta Aleatória para classificação
+-   Acurácia: `r round(py$acuracia*100, 2)`%
+-   Ideia aqui foi usar os dados de avaliação dos produtos para ajudar a melhorar a categorização de qual categoria pertenceria o valores de dimensão do produto (peso, altura, comprimento...)
+-   Para os dados numéricos que faltavam de informações do anúncio do produto (tamanho do título, quantidade de fotos e tamanho da descrição), usou-se a média. Esses dados entraram na Árvore para melhorar previsão de categorias dos prodtos
 
 ```{r}
 #| fig-height: 15
@@ -454,7 +455,6 @@ ggplot(data %>% filter(tipo=='Antes'),
   theme_minimal()
 ```
 
-
 ```{r}
 ggplot(data %>% filter(tipo=='Depois'), 
        aes(x = categorias, y = n, fill = tipo)) +
@@ -464,7 +464,7 @@ ggplot(data %>% filter(tipo=='Depois'),
   theme_minimal()  
 ```
 
-- Dessa classificação, os maiores erros se deram em classes muito pequenas (cor clara = verdadeiro positivo)
+-   Dessa classificação, os maiores erros se deram em classes muito pequenas (cor clara = verdadeiro positivo)
 
 ```{python}
 fig, ax = plt.subplots(figsize=(25,20))  
@@ -504,13 +504,12 @@ colunas_finais = ['order_id', 'boleto', 'credit_card', 'debit_card', 'voucher',
 df_final = df[colunas_finais]
 ```
 
-## Resumo dados 
+## Resumo dados
 
 ```{python}
 df_prod.describe().round(2).transpose()
 df_items.describe().round(2).transpose()
 ```
-
 
 # Descritiva
 
@@ -532,7 +531,6 @@ ggplot(data, aes(x = payment_type)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-
 ```{r}
 data = py$df_registro
 ggplot(data= data) + 
@@ -553,7 +551,6 @@ ggplot(data= data) +
 
 > Aqui parece haver uma possível mudança de comportamento do preço de compra entre a primeira e a segunda compra
 
-
 ```{r}
 data = py$df_compra
 
@@ -564,7 +561,6 @@ ggplot(data= data %>% arrange(-log_price))+
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
   labs(y = 'Log-Preço', x = 'categoria', title = 'Comportamento Geral')
 ```
-
 
 ```{r}
 #| fig-width: 15
@@ -637,7 +633,8 @@ df_resultado.describe().round(2).transpose()
 Variáveis que contribuiem para o aumento do valor de compra dos clientes
 :::
 
-* Conclusão aqui é que oferecer voucher não gera efeito significativo no aumento do valor que o cliente gasta na **Olist**.
+-   Conclusão aqui é que oferecer voucher não gera efeito significativo no aumento do valor que o cliente gasta na **Olist**.
+
 ```{r}
 data = py$df_compra_ordem
 data = data %>%
@@ -689,23 +686,25 @@ anova(fit, update(fit, ~. -voucher))
 ```
 
 
-- Alimento e pet-shop, se a primeira compra gasta-se mais com pet-shop, a próxima será com alimentação e vice-versa. Caso ambas estejam na mesma compra, gasta-se mais com alimentação
-- Artesanato supera pet-shop sempre, exceto quando ambos são comprados em compras futuras, aí são iguais na contribuição do gasto do cliente na loja 
-- Itens de casa se sobressaem dos itens de pet-shop na primeira compra. Quando se gasta mais em pet-shop, parece implicar que a pessoa passa a gastar menos com itens de casa. Algo similar é concluído para eletrodomésticos, acessórios de informática e PC's.
-- Pet-shop supera itens de telefonia em todos os casos de compra
-- Pet-shop perde para portáteis em todos os casos de compra, ou seja, o gasto com portáteis supera esse item tanto na primeira quanto na segunda compra. 
+-   Alimento e pet-shop, se a primeira compra gasta-se mais com pet-shop, a próxima será com alimentação e vice-versa. Caso ambas estejam na mesma compra, gasta-se mais com alimentação
 
+-   Artesanato supera pet-shop sempre, exceto quando ambos são comprados em compras futuras, aí são iguais na contribuição do gasto do cliente na loja
 
-- Pet-shop só se sobressai de itens de beleza e saúde quando já foi comprado anteriormente
-- Pet-shop sempre perde para itens de fashion (roupas), exceto quando já se tenha comprado anteriormente
+-   Itens de casa se sobressaem dos itens de pet-shop na primeira compra. Quando se gasta mais em pet-shop, parece implicar que a pessoa passa a gastar menos com itens de casa. Algo similar é concluído para eletrodomésticos, acessórios de informática e PC's.
 
+-   Pet-shop supera itens de telefonia em todos os casos de compra
+
+-   Pet-shop perde para portáteis em todos os casos de compra, ou seja, o gasto com portáteis supera esse item tanto na primeira quanto na segunda compra.
+
+-   Pet-shop só se sobressai de itens de beleza e saúde quando já foi comprado anteriormente
+
+-   Pet-shop sempre perde para itens de fashion (roupas), exceto quando já se tenha comprado anteriormente
 
 ::: callout-tip
 **Possíveis Estratégias para vender mais itens de Pet-Shop:**
 
-- Parece que o cliente alvo para os itens de pet-shop, gasta mais com esses itens depois que estão com seus itens básicos já adquiridos em suas primeiras compras. Depois de garantir seus itens básicos e gastar com seus pets, esse cliente está mais apto a gastar mais com artesanato, 'coisas legais' e itens de viagem, por exemplo.
+-   Parece que o cliente alvo para os itens de pet-shop, gasta mais com esses itens depois que estão com seus itens básicos já adquiridos em suas primeiras compras. Depois de garantir seus itens básicos e gastar com seus pets, esse cliente está mais apto a gastar mais com artesanato, 'coisas legais' e itens de viagem, por exemplo.
 :::
-
 
 ```{r}
 # So categoricas aqui
@@ -732,10 +731,10 @@ CompMult_visual(tukey_amostra)
 
 **Abaixo será feita uma análise marginal de pet-shop, ou seja, desconsiderando a ordem da compra:**
 
-Aqui vemos uma análise mais direta do que já foi concluído acima: 
+Aqui vemos uma análise mais direta do que já foi concluído acima:
 
-- Gasta-se mais com Pet-shop em relação a itens de consumo domésticos
-- Gasta-se menos com Pet-shop em relação a itens de desejo, como artigos de viagem e artesanato
+-   Gasta-se mais com Pet-shop em relação a itens de consumo domésticos
+-   Gasta-se menos com Pet-shop em relação a itens de desejo, como artigos de viagem e artesanato
 
 ```{r}
 CompMult_visual(
@@ -748,17 +747,19 @@ CompMult_visual(
 
 ### Gasto vs Avaliação {#sec-gasto_ava}
 
-- Clientes que gastam mais ou em produtos mais caros tendem a gostar mais de sua experiência de compra
-- **Clientes que avaliam em nota máxima e mínima gastam de forma igual. Isso pode ser indicativo que há outras variáveis que se associam ao gasto e a satisfação do cliente**
+-   Clientes que gastam mais ou em produtos mais caros tendem a gostar mais de sua experiência de compra
+-   **Clientes que avaliam em nota máxima e mínima gastam de forma igual. Isso pode ser indicativo que há outras variáveis que se associam ao gasto e a satisfação do cliente**
+
 ```{r}
 CompMult_visual(
   tukey_result$review_score
   )
 ```
 
-### Gasto vs Primeira compra 
+### Gasto vs Primeira compra
 
-- De fato, gasta-se mais na primeira compra. Como a @sec-gasto_ava mostrou que satisfação não está associada ao gasto, é importante garantir outros incentivos além da boa experiência para o cliente na sua compra.
+-   De fato, gasta-se mais na primeira compra. Como a @sec-gasto_ava mostrou que satisfação não está associada ao gasto, é importante garantir outros incentivos além da boa experiência para o cliente na sua compra.
+
 ```{r}
 CompMult_visual(
   tukey_result$primeira_compra_cliente
@@ -771,7 +772,7 @@ Em relação aos gastos:
 
 $$NorteNordeste >  Sudeste-SP = Centro-Oeste > Sul > SP$$
 
-* Nesse caso, também indicou que $Sudeste-SP = Sul$ mas $Centro-Oeste \neq Sul$ o que é um pouco contraintuitivo, mas talvez numa amostra maior, ou considerando interações, seria possível afirmar em quais condições faz com que Centro-Oeste e Sul se diferenciem.
+-   Nesse caso, também indicou que $Sudeste-SP = Sul$ mas $Centro-Oeste \neq Sul$ o que é um pouco contraintuitivo, mas talvez numa amostra maior, ou considerando interações, seria possível afirmar em quais condições faz com que Centro-Oeste e Sul se diferenciem.
 
 ```{r}
 CompMult_visual(
@@ -791,7 +792,7 @@ CompMult_visual(
 
 ### Gasto vs Forma de pagamento
 
-* Pessoas que optam por boleto, gastam menos
+-   Pessoas que optam por boleto, gastam menos
 
 ```{r}
 CompMult_visual(
@@ -799,7 +800,7 @@ CompMult_visual(
   )
 ```
 
-* Pessoas que optam por cartão de crédito e a usam em mais parcelas, gastam mais
+-   Pessoas que optam por cartão de crédito e a usam em mais parcelas, gastam mais
 
 ```{r}
 CompMult_visual(
@@ -807,7 +808,7 @@ CompMult_visual(
   )
 ```
 
-* Pessoas que optam por cartão de débito, gastam mais
+-   Pessoas que optam por cartão de débito, gastam mais
 
 ```{r}
 CompMult_visual(
@@ -818,13 +819,12 @@ CompMult_visual(
 ::: callout-tip
 **Possíveis Estratégias para vender mais itens de Pet-Shop nas demais análises:**
 
-- Incentivar o uso do cartão de crédito e o parcelamento da compra poderia gerar mais oportunidade do cliente gastar mais na loja. Promoções no meio de semana são igualmente eficazes para aumentar o ticket-médio do cliente. Aproveitar a primeira compra do cliente para arrecadar mais em sua compra, mas também garantir que ele volte para gastar com itens de desejo ao invés de apenas artigos de necessidade imediata refletirão de forma positiva no gasto do cliente na loja. Por fim, aumentar a exposição no mercado Norte-Nordeste parece gerar um crescimento mais significativo que nas demais regiões.
-
+-   Incentivar o uso do cartão de crédito e o parcelamento da compra poderia gerar mais oportunidade do cliente gastar mais na loja. Promoções no meio de semana são igualmente eficazes para aumentar o ticket-médio do cliente. Aproveitar a primeira compra do cliente para arrecadar mais em sua compra, mas também garantir que ele volte para gastar com itens de desejo ao invés de apenas artigos de necessidade imediata refletirão de forma positiva no gasto do cliente na loja. Por fim, aumentar a exposição no mercado Norte-Nordeste parece gerar um crescimento mais significativo que nas demais regiões.
 :::
 
 # Agrupamento de clientes
 
-## Variáveis indipendentes principais 
+## Variáveis indipendentes principais
 
 ```{python}
 df_pca_dummy = pd.get_dummies(df_final['regiao_cliente'], dtype=int)
@@ -859,7 +859,6 @@ X_train_pca_pior_cenario = pca.fit_transform(x_treino_escalado_pior_cenario)
 melhor_comp_pior_cenario = round(np.max(pca.explained_variance_ratio_)*100,2)
 ```
 
-
 ```{python}
 df_corr = x_treino.corr()
 correlation_pairs = (# Transforma a matriz em formato longo
@@ -882,7 +881,6 @@ df_cor_long = (df_cor_final[['level_0', 'level_1']]
 x_treino = x_treino.loc[:,x_treino.columns.isin(df_cor_long.col.unique())]
 ```
 
-
 ```{python}
 x_treino_escalado = scaler.fit_transform(x_treino) # dados reescalados
 X_train_pca = pca.fit_transform(x_treino_escalado )
@@ -893,10 +891,10 @@ Valor_Esperado_Minimo = round((1/np.sqrt(len(df_cor_long.col.unique())))*100,2)
 melhor_comp_melhorado_cenario =  round(np.max(pca.explained_variance_ratio_)*100,2)
 ```
 
-- Usando todas variáveis, não alcançou explicabilidade mínima na variabilidade de pelo menos uma componente. Assim, optei por tratar da PCA com as variáveis mais correlacionadas. Ganho:
+-   Usando todas variáveis, não alcançou explicabilidade mínima na variabilidade de pelo menos uma componente. Assim, optei por tratar da PCA com as variáveis mais correlacionadas. Ganho:
 
 | Tipo e Cenário | Pior (todas variáveis) | Melhorado (mais correlacionadas) |
-|----------------|------------------------|---------------------------------|
+|------------------|-----------------------|-------------------------------|
 | Perc valor esperado mínimo componente | `r py$Valor_Esperado_Minimo_inicial` | `r py$Valor_Esperado_Minimo` |
 | Perc melhor componente | `r py$melhor_comp_pior_cenario` | `r py$melhor_comp_melhorado_cenario` |
 
@@ -907,7 +905,6 @@ labels = [str(x) for x in range(1, len(per_var)+1)]
 df_resul_pca = pd.DataFrame({'per_var_acum':pca.explained_variance_ratio_.cumsum()*100, 'comp':pca.get_feature_names_out()})
 print(df_resul_pca)
 ```
-
 
 ```{python}
 fig = plt.figure(figsize=(8,5))
@@ -942,7 +939,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from scipy.cluster import hierarchy
 
-n = 1000
+n = 20000
 new_x_treino_reduzido = new_x_treino.head(n)
 tabela = new_x_treino_reduzido .drop('customer_unique_id', axis=1)
 #new_x_treino.sample(n=n, random_state=1)
@@ -961,7 +958,6 @@ new_x_treino_reduzido.loc[:, 'grupo'] = grupo
 ```
 
 > Dos clientes únicos, o percentual alocado em cada cluster foi:
-
 
 ```{python}
 n_grupo = new_x_treino_reduzido.groupby('grupo').size()
@@ -1018,7 +1014,6 @@ pd.DataFrame(
 
 > O que compram:
 
-
 ```{python}
 df_agrupamento_prod = new_x_treino_reduzido.merge(df_compra_ordem, on='customer_unique_id')
 
@@ -1038,4 +1033,3 @@ soma = tabela_quant.sum(axis=0)
 tabela_perc = round(tabela_quant.div(soma, axis=1) * 100,2)
 tabela_perc
 ```
-
