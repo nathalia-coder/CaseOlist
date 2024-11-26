@@ -435,10 +435,11 @@ tab_freq_cat_final = pd.concat([tab_freq_cat,tab_freq_cat_dp])
 - Método: Floresta Aleatória para classificação
 - Acurácia: `r round(py$acuracia*100, 2)`%
 - Ideia aqui foi usar os dados de avaliação dos produtos para ajudar a melhorar a categorização de qual categoria pertenceria o valores de dimensão do produto (peso, altura, comprimento...)
-- Para os dados numéricos que faltavam de informações do anúncio do produto (tamanho do título, quantidade de fotos e tamanho da descrição), usou-se a média. Esses dados entraram na Árvore 
+- Para os dados numéricos que faltavam de informações do anúncio do produto (tamanho do título, quantidade de fotos e tamanho da descrição), usou-se a média. Esses dados entraram na Árvore para melhorar previsão de categorias dos prodtos
 
 
 ```{r}
+#| fig-height: 15
 data = py$tab_freq_cat_final
 
 data$categorias <- factor(data$categorias, 
@@ -450,8 +451,11 @@ ggplot(data %>% filter(tipo=='Antes'),
   geom_bar(stat = "identity") +
   coord_flip() +  # Rotaciona
   labs(x = "Categoria", y = "Valor", title = "Gráfico de Barras") + 
-  theme_minimal()  
+  theme_minimal()
+```
 
+
+```{r}
 ggplot(data %>% filter(tipo=='Depois'), 
        aes(x = categorias, y = n, fill = tipo)) +
   geom_bar(stat = "identity", fill = '#32A4A8') +
@@ -460,8 +464,10 @@ ggplot(data %>% filter(tipo=='Depois'),
   theme_minimal()  
 ```
 
+- Dessa classificação, os maiores erros se deram em classes muito pequenas (cor clara = verdadeiro positivo)
+
 ```{python}
-fig, ax = plt.subplots(figsize=(20,10))  
+fig, ax = plt.subplots(figsize=(25,20))  
 sns.heatmap(matriz, vmax=1., square=False).xaxis.tick_top()
 plt.xticks(rotation=90)
 plt.show()
@@ -545,7 +551,7 @@ ggplot(data= data) +
   theme_minimal()
 ```
 
-* Aqui parece haver uma possível mudança de comportamento do preço de compra entre a primeira e a segunda compra
+> Aqui parece haver uma possível mudança de comportamento do preço de compra entre a primeira e a segunda compra
 
 
 ```{r}
@@ -561,6 +567,7 @@ ggplot(data= data %>% arrange(-log_price))+
 
 
 ```{r}
+#| fig-width: 15
 data = py$df_compra_ordem %>% 
   mutate(
     primeira_compra_cliente = ifelse(primeira_compra_cliente==0,"Cliente Recorrente", "Cliente Novo")
@@ -572,6 +579,8 @@ ggplot(data= data %>% arrange(-log_price))+
     theme_light() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
+> Pedidos por dia de semana
 
 ```{python}
 # | fig-cap: 'Proporção de pedidos por dia da semana'
@@ -595,11 +604,13 @@ tab_perc_dia.columns = ['Dia do Pedido', 'Cliente Novo', 'Cliente Recorrente']
 tab_perc_dia
 ```
 
+> Engajamento do cliente em avaliar
+
 ```{r}
 py$df_ordem_compra %>% 
     ggplot(aes(y = len_comentario, x = as_factor(review_score), fill = as_factor(colocou_exc))) +
     geom_boxplot() + 
-   labs(y = 'Avaliação', x = 'Tamanho do comentário', fill = 'Ter colocado !')
+   labs(x = 'Avaliação', y = 'Tamanho do comentário', fill = 'Ter colocado !')
 ```
 
 > Itens mais frequentes comprados em um mesmo pedido
@@ -813,6 +824,8 @@ CompMult_visual(
 
 # Agrupamento de clientes
 
+## Variáveis indipendentes principais 
+
 ```{python}
 df_pca_dummy = pd.get_dummies(df_final['regiao_cliente'], dtype=int)
 df_pca = pd.concat([df_final.drop('regiao_cliente', axis=1), df_pca_dummy], axis=1)
@@ -880,7 +893,7 @@ Valor_Esperado_Minimo = round((1/np.sqrt(len(df_cor_long.col.unique())))*100,2)
 melhor_comp_melhorado_cenario =  round(np.max(pca.explained_variance_ratio_)*100,2)
 ```
 
-- Usando todas variáveis, não alcançou explicabilidade mínima na variabilidade de pelo menos uma componente optei por tratar da PCA com as variáveis mais correlacionadas. Ganho:
+- Usando todas variáveis, não alcançou explicabilidade mínima na variabilidade de pelo menos uma componente. Assim, optei por tratar da PCA com as variáveis mais correlacionadas. Ganho:
 
 | Tipo e Cenário | Pior (todas variáveis) | Melhorado (mais correlacionadas) |
 |----------------|------------------------|---------------------------------|
@@ -892,7 +905,7 @@ per_var = np.round(pca.explained_variance_ratio_*100, decimals=1)
 labels = [str(x) for x in range(1, len(per_var)+1)]
 
 df_resul_pca = pd.DataFrame({'per_var_acum':pca.explained_variance_ratio_.cumsum()*100, 'comp':pca.get_feature_names_out()})
-df_resul_pca
+print(df_resul_pca)
 ```
 
 
@@ -903,9 +916,11 @@ plt.plot(pca.explained_variance_ratio_*100,  'ro-', linewidth=2)
 plt.title('Scree Plot')
 plt.xlabel('Componente Principal')
 plt.ylabel('Autovalor')
-plt.axhline(y=Valor_Esperado_Minimo, color='r', linestyle='--', label='y=1')  # Linha vermelha em y=1, linha pontilhada
+plt.axhline(y=10, color='r', linestyle='--', label='y=1')  # Linha vermelha em y=1, linha pontilhada
 plt.show()
 ```
+
+> Resumo das componentes principais
 
 ```{python}
 df_pca_resultados = pca.transform(x_treino)
@@ -913,20 +928,21 @@ new_x_treino = pd.DataFrame({
     'customer_unique_id':df_pca.customer_unique_id
     ,'c1': df_pca_resultados[:, 0]
     ,'c2': df_pca_resultados[:, 1]
-    #,'c3': df_pca_resultados[:, 2]
-    #,'c4': df_pca_resultados[:, 3]
+    ,'c3': df_pca_resultados[:, 2]
+    ,'c4': df_pca_resultados[:, 3]
 })
 
-new_x_treino.describe()
+new_x_treino.describe().round(2)
 ```
 
+## Modelo de Classificação dos clientes
 
 ```{python}
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from scipy.cluster import hierarchy
 
-n = 10000
+n = 1000
 new_x_treino_reduzido = new_x_treino.head(n)
 tabela = new_x_treino_reduzido .drop('customer_unique_id', axis=1)
 #new_x_treino.sample(n=n, random_state=1)
@@ -949,7 +965,9 @@ new_x_treino_reduzido.loc[:, 'grupo'] = grupo
 
 ```{python}
 n_grupo = new_x_treino_reduzido.groupby('grupo').size()
-(n_grupo / sum(n_grupo))*100
+pd.DataFrame(
+  (n_grupo / sum(n_grupo))*100
+  )
 ```
 
 ```{python}
@@ -961,19 +979,25 @@ df_agrupamento = new_x_treino_reduzido.merge(df, on='customer_unique_id')
 ```{python}
 df_agrupamento_regiao = df_agrupamento.groupby(['grupo','regiao_cliente']).size().reset_index()
 df_agrupamento_regiao.columns = [ 'grupo', 'regiao_cliente','quant' ]
-df_agrupamento_regiao_pivot = df_agrupamento_regiao.pivot_table(
+df_regiao_grupo = pd.DataFrame(
+  df_agrupamento_regiao.pivot_table(
     index='regiao_cliente',  
     columns='grupo',         
     values='quant',           
     aggfunc='sum',            
     fill_value=0 
-)
+))
+
+soma = df_regiao_grupo.sum(axis=0)
+tabela_perc = round(df_regiao_grupo.div(soma, axis=1) * 100,2)
+tabela_perc
 ```
 
 > Como se comportam em média nas compras
 
 ```{python}
-df_agrupamento.groupby('grupo').agg(
+pd.DataFrame(
+  df_agrupamento.groupby('grupo').agg(
     colocou_titulo=('colocou_titulo', 'mean'),
     len_titulo=('len_titulo', 'mean'),
     len_comentario=('len_comentario', 'mean'),
@@ -989,6 +1013,29 @@ df_agrupamento.groupby('grupo').agg(
     sd_log_price=('log_price', 'std'),
     review_score_maximo =('review_score', 'mean')
 ).reset_index()
+).round(3)
 ```
 
-# Fim
+> O que compram:
+
+
+```{python}
+df_agrupamento_prod = new_x_treino_reduzido.merge(df_compra_ordem, on='customer_unique_id')
+
+df_agrupamento_prod2 = df_agrupamento_prod.groupby(['grupo','categorias_novas_produtos']).size().reset_index()
+df_agrupamento_prod2.columns = [ 'grupo', 'categoria','quant' ]
+
+tabela_quant = pd.DataFrame(
+  df_agrupamento_prod2.pivot_table(
+    index='categoria',  
+    columns='grupo',         
+    values='quant',           
+    aggfunc='sum',            
+    fill_value=0 
+))
+
+soma = tabela_quant.sum(axis=0)
+tabela_perc = round(tabela_quant.div(soma, axis=1) * 100,2)
+tabela_perc
+```
+
